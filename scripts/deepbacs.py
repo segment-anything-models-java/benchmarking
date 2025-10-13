@@ -1,14 +1,23 @@
-from ai.models.samj import SAMJ_Annotator
-from ai.models.samj.communication import SAM2Tiny, SAM2Small, SAM2Large, EfficientSAM, EfficientViTSAM
+from io.bioimage.modelrunner.numpy import DecodeNumpy
+from ai.nets.samj.ij import SAMJ_Annotator
+from ai.nets.samj.communication.model import SAM2Tiny, SAM2Small, SAM2Large, EfficientSAM, EfficientViTSAML2
 from ai.nets.samj.annotation import Mask
 
-from io.bioimage.modelrunner.numpy import DecodeNumpy
+
 
 from ij import IJ
 from net.imglib2.img.display.imagej import ImageJFunctions
 
 import os
 import sys
+
+
+import sys
+
+print("All arguments:", sys.argv)
+
+
+
 
 FILE_PATH = "/home/carlos/Desktop/Fiji.app/samj/deepbacs/tmp/"
 
@@ -17,7 +26,7 @@ im_path = ""
 point_prompts = ""
 rect_prompts = ""
 
-models = [SAM2Tiny(), SAM2Small(), SAM2Large(), EfficientSAM(), EfficientViTSAM()]
+models = [SAM2Tiny(), SAM2Small(), SAM2Large(), EfficientSAM(), EfficientViTSAML2()]
 models_str = ["tiny", "small", "large", "eff", "effvit"]
 
 for model, model_str in zip(models, models_str):
