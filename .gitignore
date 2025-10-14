@@ -14,5 +14,9 @@
 
 # miscellaneous
 *.swp
+*.npy
+
 
 prep.sh
+
+/tmp/

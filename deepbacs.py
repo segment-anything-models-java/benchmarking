@@ -17,14 +17,16 @@ def iou_diagonal_fast(gt, pred):
 
 
 
-N_POINT_PROMPTS = 3
+N_POINT_PROMPTS = 1
 
 SCRIPT_PATH = "scripts/deepbacs.py"
 
 DEEPBACS_DIR = "/home/carlos/Pictures/samj_rebuttal/deepbacs/test/"
 REAL_FOLDER = "brightfield"
 MASK_FOLDER = "masks_RoiMap"
-RESULTS_PATH = "tmp/"
+RESULTS_PATH = os.path.join(os.getcwd(), "tmp")
+if not os.path.isdir(RESULTS_PATH):
+    os.makedirs(RESULTS_PATH)
 
 FIJI_PATH = "/home/carlos/Desktop/Fiji.app"
 
@@ -51,36 +53,53 @@ for ii, ff in enumerate(os.listdir(os.path.join(DEEPBACS_DIR, REAL_FOLDER))):
     im = tifffile.imread(os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff))
     bboxes = []
     points = []
+    #for i in range(33, 34):
     for i in range(1, mask.max() + 1):
         inds = np.where(mask == i)
         bottom, top = int(inds[0].min()), int(inds[0].max())
         left, right = int(inds[1].min()), int(inds[1].max())
-        bboxes.append([[left, bottom, right - left, top - bottom]])
+        #bboxes.append([[left, bottom, right - left, top - bottom]])
+        bboxes.extend([[left, bottom, right - left + 1, top - bottom + 1]])
 
         point_inds = random.sample(range(inds[0].shape[0]), N_POINT_PROMPTS)
         xs = inds[1][point_inds]
         ys = inds[0][point_inds]
-        pps = [[]]
+        pps = []
         for j in range(N_POINT_PROMPTS):
-            pps.append([[int(xs[j]), int(ys[j])]])
+            #pps.append([[int(xs[j]), int(ys[j])]])
+            pps.append([int(xs[j]), int(ys[j])])
 
-        points.append([pps])
+        #points.append([pps])
+        points.extend(pps)
 
     command = [
         os.path.join(FIJI_PATH, FIJI_EXEC),
+        "--ij2",
         "--headless",
         "--console",
-        SCRIPT_PATH,
-        json.dumps(bboxes),
-        json.dumps(points)
+        "--run",
+        os.path.join(os.getcwd(), SCRIPT_PATH),
+        f"im_path=\"{os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff)}\", bboxes=\"{json.dumps(bboxes)}\", points=\"{json.dumps(points)}\", " \
+        + f"tmp_path=\"{RESULTS_PATH}\""
     ]
+
 
     # Run the command
     result = subprocess.run(command, capture_output=True, text=True)
-    print(result)
+    if result.returncode != 0:
+        import shlex
+        print(shlex.join(command))
+        print("something happened")
+        raise Exception()
+
     for j, model_type in enumerate(model_types):
         for k, prompt_type in enumerate(promtp_types):
-            path_to_tmp = os.path.join(RESULTS_PATH, f"pred_{model_type}_{prompt_type}.npy")
-            tmp_file = np.load(path_to_tmp)
-            iou = iou_diagonal_fast(mask, tmp_file)
-            scores_mat[ii, j * len(model_types) + k] = iou
+            ious = []
+            for pn in range(1, mask.max() + 1):
+                path_to_tmp = os.path.join(RESULTS_PATH, f"pred_{model_type}_{prompt_type}_{pn - 1}.npy")
+                tmp_file = np.load(path_to_tmp).T
+                iou = iou_diagonal_fast((mask == pn) * 1, tmp_file)
+                ious.append(iou[0])
+            ious = np.array(ious)
+            scores_mat[ii, j * len(promtp_types) + k] = ious.mean()
+np.save("deepbacs.npy", scores_mat)

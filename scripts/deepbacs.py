@@ -1,46 +1,71 @@
+#@String im_path
+#@String bboxes
+#@String points
+#@String tmp_path
+
 from io.bioimage.modelrunner.numpy import DecodeNumpy
 from ai.nets.samj.ij import SAMJ_Annotator
 from ai.nets.samj.communication.model import SAM2Tiny, SAM2Small, SAM2Large, EfficientSAM, EfficientViTSAML2
 from ai.nets.samj.annotation import Mask
+from net.imglib2 import Point
 
-
+from java.util import ArrayList
+from jarray import array as jarray
+from java.awt import Rectangle
 
 from ij import IJ
-from net.imglib2.img.display.imagej import ImageJFunctions
+from net.imglib2.img import ImagePlusAdapter
+from net.imglib2 import FinalInterval
 
 import os
-import sys
-
-
-import sys
-
-print("All arguments:", sys.argv)
+import json
 
 
 
+def to_point_prompts_java(points_py):
+    # If your data is nested like [[[[[x,y]], [[x,y]]]]], flatten it:
+    lst = ArrayList()
+    for pp in points_py:
+        lst.add(Point(pp[0], pp[1]))
+    return lst
 
-FILE_PATH = "/home/carlos/Desktop/Fiji.app/samj/deepbacs/tmp/"
+def to_rect_prompts_java(bboxes_py):
+    lst = ArrayList()
+    for bb in bboxes_py:
+        x, y, w, h = map(int, bb)
+        lst.add(FinalInterval(jarray([x, y], 'l'), jarray([w + x - 1, h + y - 1], 'l')))
+    return lst
+
+
+FILE_PATH = tmp_path
 
 ## PARSE ARGS
-im_path = ""
-point_prompts = ""
-rect_prompts = ""
+point_prompts = to_point_prompts_java(json.loads(points))
+rect_prompts = to_rect_prompts_java(json.loads(bboxes))
+
 
 models = [SAM2Tiny(), SAM2Small(), SAM2Large(), EfficientSAM(), EfficientViTSAML2()]
 models_str = ["tiny", "small", "large", "eff", "effvit"]
 
+wrapped = ImagePlusAdapter.wrap(IJ.openImage(im_path))
 for model, model_str in zip(models, models_str):
 
-    wrapped = ImageJFunctions.wrap(IJ.open(im_path))
     model.setImage(wrapped, None)
     model.setReturnOnlyBiggest(True)
 
-    mask = SAMJ_Annotator.samJReturnContours(model, wrapped, point_prompts, None)
-    mask = Mask.getMask(wrapped.dimensionsAsLongArray()[0], wrapped.dimensionsAsLongArray()[1], mask)
-    name = "pred_" + model_str + "_points.npy"
-    DecodeNumpy.saveNpy(os.path.join(FILE_PATH, name), mask)
+    for ii, bbox in enumerate(rect_prompts):
+        segs = model.fetch2dSegmentation(bbox)
+        mask = Mask.getMask(wrapped.dimensionsAsLongArray()[0], wrapped.dimensionsAsLongArray()[1], segs)
+        name = "pred_" + model_str + "_bboxes_" + str(ii) + ".npy"
+        DecodeNumpy.saveNpy(os.path.join(FILE_PATH, name), mask)
+        
+    for ii, pp in enumerate(point_prompts):
+        point_list = ArrayList()
+        point_list.add(pp)
+        segs = model.fetch2dSegmentation(point_list, ArrayList())
+        mask = Mask.getMask(wrapped.dimensionsAsLongArray()[0], wrapped.dimensionsAsLongArray()[1], segs)
+        name = "pred_" + model_str + "_points_" + str(ii) + ".npy"
+        DecodeNumpy.saveNpy(os.path.join(FILE_PATH, name), mask)
 
-    mask = SAMJ_Annotator.samJReturnContours(model, wrapped, None, rect_prompts)
-    mask = Mask.getMask(wrapped.dimensionsAsLongArray()[0], wrapped.dimensionsAsLongArray()[1], mask)
-    name = "pred_" + model_str + "_bboxes.npy"
-    DecodeNumpy.saveNpy(os.path.join(FILE_PATH, name), mask)
+    model.closeProcess()
+    del model
