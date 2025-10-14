@@ -25,8 +25,11 @@ import json
 def to_point_prompts_java(points_py):
     # If your data is nested like [[[[[x,y]], [[x,y]]]]], flatten it:
     lst = ArrayList()
-    for pp in points_py:
-        lst.add(Point(pp[0], pp[1]))
+    for instance in points_py:
+        lst2 = ArrayList()
+        for pp in instance:
+            lst2.add(Point(pp[0], pp[1]))
+        lst.add(lst2)
     return lst
 
 def to_rect_prompts_java(bboxes_py):
@@ -59,9 +62,7 @@ for model, model_str in zip(models, models_str):
         name = "pred_" + model_str + "_bboxes_" + str(ii) + ".npy"
         DecodeNumpy.saveNpy(os.path.join(FILE_PATH, name), mask)
         
-    for ii, pp in enumerate(point_prompts):
-        point_list = ArrayList()
-        point_list.add(pp)
+    for ii, point_list in enumerate(point_prompts):
         segs = model.fetch2dSegmentation(point_list, ArrayList())
         mask = Mask.getMask(wrapped.dimensionsAsLongArray()[0], wrapped.dimensionsAsLongArray()[1], segs)
         name = "pred_" + model_str + "_points_" + str(ii) + ".npy"

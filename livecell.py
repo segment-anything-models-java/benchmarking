@@ -67,16 +67,13 @@ for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())):
     H, W = coco_info["height"], coco_info["width"]
     ann_ids = coco.getAnnIds(imgIds=[coco_info["id"]])
     anns = coco.loadAnns(ann_ids)
-    mask = np.zeros((H, W), dtype=np.uint16)
-    for i, ann in enumerate(anns, start=1):
-        m = coco.annToMask(ann).astype(bool)  # HxW {0,1}
-        mask[m] = i
 
     bboxes = []
     points = []
     #for i in range(33, 34):
-    for i in range(1, mask.max() + 1):
-        inds = np.where(mask == i)
+    for i, ann in enumerate(anns, start=1):
+        m = coco.annToMask(ann).astype(bool)
+        inds = np.where(m)
         bottom, top = int(inds[0].min()), int(inds[0].max())
         left, right = int(inds[1].min()), int(inds[1].max())
         #bboxes.append([[left, bottom, right - left, top - bottom]])
@@ -101,14 +98,14 @@ for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())):
         "--console",
         "--run",
         os.path.join(os.getcwd(), SCRIPT_PATH),
-        f"im_path=\"{os.path.join(LIVECELL_DIR, REAL_FOLDER, coco_info["file_name"])}\", bboxes=\"{json.dumps(bboxes)}\", points=\"{json.dumps(points)}\", " \
+        f"im_path=\"{os.path.join(LIVECELL_DIR, REAL_FOLDER, coco_info['file_name'])}\", bboxes=\"{json.dumps(bboxes)}\", points=\"{json.dumps(points)}\", " \
         + f"tmp_path=\"{RESULTS_PATH}\""
     ]
 
 
     # Run the command
     result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode != 0:
+    if "[ERROR]" in result.stderr:
         import shlex
         print(shlex.join(command))
         print("something happened")
@@ -117,10 +114,11 @@ for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())):
     for j, model_type in enumerate(model_types):
         for k, prompt_type in enumerate(promtp_types):
             ious = []
-            for pn in range(1, mask.max() + 1):
+            for pn, ann in enumerate(anns, start=1):
+                m = coco.annToMask(ann).astype(bool)
                 path_to_tmp = os.path.join(RESULTS_PATH, f"pred_{model_type}_{prompt_type}_{pn - 1}.npy")
                 tmp_file = np.load(path_to_tmp).T
-                iou = iou_diagonal_fast((mask == pn) * 1, tmp_file)
+                iou = iou_diagonal_fast(m * 1, tmp_file)
                 ious.append(iou[0])
             ious = np.array(ious)
             scores_mat[ii, j * len(promtp_types) + k] = ious.mean()
