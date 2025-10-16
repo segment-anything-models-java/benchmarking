@@ -1,8 +1,3 @@
-#@String im_path
-#@String bboxes
-#@String points
-#@String tmp_path
-
 from io.bioimage.modelrunner.numpy import DecodeNumpy
 from ai.nets.samj.ij import SAMJ_Annotator
 from ai.nets.samj.communication.model import SAM2Tiny, SAM2Small, SAM2Large, EfficientSAM, EfficientViTSAML2
@@ -14,6 +9,8 @@ from jarray import array as jarray
 from java.awt import Rectangle
 
 from ij import IJ
+from ij import ImagePlus
+from ij.plugin import CompositeConverter
 from net.imglib2.img import ImagePlusAdapter
 from net.imglib2 import FinalInterval
 
@@ -47,12 +44,14 @@ point_prompts = to_point_prompts_java(json.loads(points))
 rect_prompts = to_rect_prompts_java(json.loads(bboxes))
 
 
-#models = [SAM2Tiny(), SAM2Small(), SAM2Large(), EfficientSAM(), EfficientViTSAML2(), ]
-#models_str = ["tiny", "small", "large", "eff", "effvit", ]
-models = [SAM2Tiny(), SAM2Small(), EfficientSAM(), EfficientViTSAML2(), ]
-models_str = ["tiny", "small", "eff", "effvit", ]
+models = [SAM2Tiny(), SAM2Small(), SAM2Large(), EfficientSAM(), EfficientViTSAML2(), ]
+models_str = ["tiny", "small", "large", "eff", "effvit", ]
 
-wrapped = ImagePlusAdapter.wrap(IJ.openImage(im_path))
+imp = IJ.openImage(im_path)
+isColorRGB = imp.getType() == ImagePlus.COLOR_RGB
+if isColorRGB:
+    imp = CompositeConverter.makeComposite(imp)
+wrapped = ImagePlusAdapter.wrap(imp)
 for model, model_str in zip(models, models_str):
 
     model.setImage(wrapped, None)
