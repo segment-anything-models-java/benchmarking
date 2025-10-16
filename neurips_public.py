@@ -75,7 +75,7 @@ scores_mat = np.zeros((len(os.listdir(os.path.join(NIPS_DIR, REAL_FOLDER))), len
 
 all_files = os.listdir(os.path.join(NIPS_DIR, REAL_FOLDER))
 all_files.sort()
-for ii, ff in enumerate(all_files[29:]):
+for ii, ff in enumerate(all_files):
     last_point_ind = len(ff) - 1 - ff[::-1].index(".")
     mask_name = ff[:last_point_ind] + "_label.tiff"
     f_names.append(ff)
