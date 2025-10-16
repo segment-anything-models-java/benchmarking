@@ -6,6 +6,25 @@ import tifffile
 import json
 import platform
 import tempfile
+from skimage.measure import label as cc_label
+
+def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
+    out = mask.copy()
+    next_id = int(out.max()) + 1
+    for lab in np.unique(out):
+        if lab == 0:
+            continue
+        cc = cc_label(out == lab, connectivity=connectivity)
+        n = int(cc.max())
+        if n <= 1:
+            continue
+        sizes = np.bincount(cc.ravel())[1:]     # sizes of components 1..n
+        keep = int(sizes.argmax() + 1)          # largest keeps original label
+        for c in range(1, n + 1):
+            if c != keep:
+                out[cc == c] = next_id
+                next_id += 1
+    return out
 
 def iou_diagonal_fast(gt, pred):
     n = gt.max()
@@ -58,7 +77,8 @@ for ii, ff in enumerate(all_files):
     last_point_ind = len(ff) - 1 - ff[::-1].index("_")
     mask_name = ff[:last_point_ind] + "_masks.png"
     f_names.append(ff)
-    mask = tifffile.imread(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name))
+    mask_pre = tifffile.imread(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name))
+    mask = split_disconnected(mask_pre, connectivity=2)
     bboxes = []
     points = []
     for i in range(1, mask.max() + 1):
@@ -136,4 +156,4 @@ for model_type in (model_types):
 
 df = pl.DataFrame(scores_mat, schema=cols)
 df = df.with_columns(pl.Series("file_names", f_names))
-df.write_csv("neurips_public.csv")
+df.write_csv("cellpose.csv")

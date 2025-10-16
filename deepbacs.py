@@ -5,6 +5,25 @@ import random
 import tifffile
 import json
 import platform
+from skimage.measure import label as cc_label
+
+def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
+    out = mask.copy()
+    next_id = int(out.max()) + 1
+    for lab in np.unique(out):
+        if lab == 0:
+            continue
+        cc = cc_label(out == lab, connectivity=connectivity)
+        n = int(cc.max())
+        if n <= 1:
+            continue
+        sizes = np.bincount(cc.ravel())[1:]     # sizes of components 1..n
+        keep = int(sizes.argmax() + 1)          # largest keeps original label
+        for c in range(1, n + 1):
+            if c != keep:
+                out[cc == c] = next_id
+                next_id += 1
+    return out
 
 def iou_diagonal_fast(gt, pred):
     n = gt.max()
@@ -49,7 +68,8 @@ promtp_types = ["points", "bboxes"]
 scores_mat = np.zeros((len(os.listdir(os.path.join(DEEPBACS_DIR, REAL_FOLDER))), len(model_types) * len(promtp_types)), dtype="float64")
 
 for ii, ff in enumerate(os.listdir(os.path.join(DEEPBACS_DIR, REAL_FOLDER))):
-    mask = tifffile.imread(os.path.join(DEEPBACS_DIR, MASK_FOLDER, ff))
+    mask_pre = tifffile.imread(os.path.join(DEEPBACS_DIR, MASK_FOLDER, ff))
+    mask = split_disconnected(mask_pre, connectivity=2)
     im = tifffile.imread(os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff))
     bboxes = []
     points = []
