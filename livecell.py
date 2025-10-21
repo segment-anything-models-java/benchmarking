@@ -80,12 +80,15 @@ for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())[20:]):
         #bboxes.append([[left, bottom, right - left, top - bottom]])
         bboxes.extend([[left, bottom, right - left + 1, top - bottom + 1]])
 
-        point_inds = random.sample(range(inds[0].shape[0]), N_POINT_PROMPTS)
+        point_inds = random.sample(range(inds[0].shape[0]), np.min([inds[0].shape[0], N_POINT_PROMPTS]))
         xs = inds[1][point_inds]
         ys = inds[0][point_inds]
         pps = []
         for j in range(N_POINT_PROMPTS):
             #pps.append([[int(xs[j]), int(ys[j])]])
+            if j >= inds[0].shape[0]:
+                pps.append([int(-1), int(-1)])
+                continue
             pps.append([int(xs[j]), int(ys[j])])
 
         #points.append([pps])
