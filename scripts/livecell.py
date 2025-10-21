@@ -28,6 +28,8 @@ def to_point_prompts_java(points_py):
     for instance in points_py:
         lst2 = ArrayList()
         for pp in instance:
+            if pp[0] == -1 and pp[1] == -1:
+                continue
             lst2.add(Point(pp[0], pp[1]))
         lst.add(lst2)
     return lst
