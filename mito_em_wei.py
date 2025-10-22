@@ -96,7 +96,7 @@ MITO_EM_MITOLAB_DIR = "/home/carlos/Pictures/samj_rebuttal/mitoem_wei_challenge/
 REAL_FOLDER = "EM30-R-im/im"
 MASK_FOLDER = "EM30-R-mito-train-val-v2/mito-val-v2"
 
-RESULTS_PATH = os.path.join(os.getcwd(), "tmp_cem_mitolab")
+RESULTS_PATH = os.path.join(os.getcwd(), "tmp_mito_em_wei")
 if not os.path.isdir(RESULTS_PATH):
     os.makedirs(RESULTS_PATH)
 POINT_PROMPTS = os.path.join(MITO_EM_MITOLAB_DIR, "point_prompts")
@@ -162,7 +162,7 @@ for cc, ff in enumerate(all_files):
 
         # points.append([pps])
         points.append(pps)
-    np.save(os.path.join(POINT_PROMPTS, ff + "_" + ff2 + ".npy"), np.array(points))
+    np.save(os.path.join(POINT_PROMPTS, ff + ".npy"), np.array(points))
 
     with open(os.path.join(os.getcwd(), SCRIPT_PATH)) as og_script:
         script_content = og_script.read()
