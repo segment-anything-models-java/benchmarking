@@ -10,6 +10,25 @@ import numpy as np
 import tifffile
 from pycocotools.coco import COCO
 
+def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
+    out = mask.copy()
+    next_id = int(out.max()) + 1
+    for lab in np.unique(out):
+        if lab == 0:
+            continue
+        cc = cc_label(out == lab, connectivity=connectivity)
+        n = int(cc.max())
+        if n <= 1:
+            continue
+        sizes = np.bincount(cc.ravel())[1:]     # sizes of components 1..n
+        keep = int(sizes.argmax() + 1)          # largest keeps original label
+        for c in range(1, n + 1):
+            if c != keep:
+                out[cc == c] = next_id
+                next_id += 1
+    return out
+
+
 
 def iou_diagonal_fast(gt, pred):
     n = gt.max()
@@ -23,22 +42,22 @@ def iou_diagonal_fast(gt, pred):
 
 N_POINT_PROMPTS = 3
 
-SCRIPT_PATH = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\default.py"
+SCRIPT_PATH = "scripts/default.py"
 
-CEM_MITOLAB_DIR = "C:\\users\\carlos\\datasets\\livecell"
-REAL_FOLDER = "livecell_test_images"
-MASK_FOLDER = "livecell_test_images"
+CEM_MITOLAB_DIR = "/home/carlos/Pictures/samj_rebuttal/mito_em/11037/data/cem_mitolab"
+REAL_FOLDER = "images"
+MASK_FOLDER = "masks"
 
 RESULTS_PATH = os.path.join(os.getcwd(), "tmp_cem_mitolab")
 if not os.path.isdir(RESULTS_PATH):
     os.makedirs(RESULTS_PATH)
-POINT_PROMPTS = os.path.join(CEM_MITOLAB_DIR, "point_prompts")
+POINT_PROMPTS = os.path.join(os.path.abspath(os.path.join(os.path.dirname(CEM_MITOLAB_DIR), '..')), "point_prompts")
 if not os.path.isdir(POINT_PROMPTS):
     os.makedirs(POINT_PROMPTS)
 
 MAX_STR_LEN = 20_000
 
-FIJI_PATH = "C:\\Users\\carlos\\Desktop\\fiji-stable-win64-jdk\\Fiji.app"
+FIJI_PATH = "/home/carlos/Desktop/Fiji.app"
 
 if platform.system() == "Linux":
     FIJI_EXEC = "ImageJ-linux64"
@@ -76,11 +95,12 @@ for ff in (all_files):
         f_names.append(ff2)
         im = tifffile.imread(os.path.join(CEM_MITOLAB_DIR, ff, REAL_FOLDER, ff2))
         mask = tifffile.imread(os.path.join(CEM_MITOLAB_DIR, ff, MASK_FOLDER, ff2))
+        mask = split_disconnected(mask, connectivity=2)
 
         bboxes = []
         points = []
         # for i in range(33, 34):
-        for i, ann in enumerate(mask.max() + 1, start=1):
+        for i in range(1, mask.max() + 1):
             m = mask == i
             inds = np.where(m)
             bottom, top = int(inds[0].min()), int(inds[0].max())
@@ -107,7 +127,7 @@ for ff in (all_files):
         np.save(os.path.join(POINT_PROMPTS, ff + "_" + ff2 + ".npy"), np.array(points))
 
         with open(os.path.join(os.getcwd(), SCRIPT_PATH)) as og_script:
-            script_content = "".join(og_script.readlines()[4:])
+            script_content = og_script.read()
         bboxes_str = "\"" + json.dumps(bboxes) + "\""
         points_str = "\"" + json.dumps(points) + "\""
         if len(bboxes_str) > MAX_STR_LEN:
@@ -122,7 +142,7 @@ for ff in (all_files):
             f"import json\n"
             f"im_path=r'{os.path.join(CEM_MITOLAB_DIR, ff, REAL_FOLDER, ff2)}'\n"
             f"bboxes={bboxes_str}\npoints={points_str}\n"
-            f"tmp_path=r'{RESULTS_PATH}'"
+            f"tmp_path=r'{RESULTS_PATH}'\n"
             + script_content
         )
 
