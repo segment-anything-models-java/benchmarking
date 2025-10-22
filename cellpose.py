@@ -129,15 +129,13 @@ for ii, ff in enumerate(all_files):
 
 
     # Run the command
-    try:
-        result = subprocess.run(command, capture_output=True, text=True)
-    finally:
-        os.remove(tmp_script_path)
+    result = subprocess.run(command, capture_output=True, text=True)
     if "[ERROR]" in result.stderr:
         import shlex
         print(shlex.join(command))
         print("something happened")
         raise Exception()
+    os.remove(temp_script_path)
 
     for j, model_type in enumerate(model_types):
         for k, prompt_type in enumerate(promtp_types):
