@@ -59,7 +59,7 @@ promtp_types = ["points", "bboxes"]
 n_ims = len(coco.loadImgs(coco.getImgIds()))
 scores_mat = np.zeros((n_ims, len(model_types) * len(promtp_types)), dtype="float64")
 
-for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())[528:]):
+for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())):
     print(ii)
     f_names.append(coco_info["file_name"])
     im = tifffile.imread(os.path.join(LIVECELL_DIR, REAL_FOLDER, coco_info["file_name"]))
