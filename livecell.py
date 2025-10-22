@@ -99,8 +99,8 @@ for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())[528:]):
 
     with open(os.path.join(os.getcwd(), SCRIPT_PATH)) as og_script:
         script_content = "".join(og_script.readlines()[4:])
-    bboxes_str = json.dumps(bboxes)
-    points_str = json.dumps(points)
+    bboxes_str = "\"" + json.dumps(bboxes) + "\""
+    points_str = "\"" + json.dumps(points) + "\""
     if len(bboxes_str) > MAX_STR_LEN:
         with open(os.path.join(RESULTS_PATH, "bboxes.json"), "w") as f:
             json.dump(bboxes, f, indent=2)
