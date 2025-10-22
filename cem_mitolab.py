@@ -8,7 +8,7 @@ import tempfile
 
 import numpy as np
 import tifffile
-from pycocotools.coco import COCO
+from skimage.measure import label as cc_label
 
 def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
     out = mask.copy()
