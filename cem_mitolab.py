@@ -92,7 +92,7 @@ for ff in (all_files):
     for ff2 in all_file_2:
         cc += 1
         print(cc)
-        f_names.append(ff2)
+        f_names.append(ff + "______" + ff2)
         im = tifffile.imread(os.path.join(CEM_MITOLAB_DIR, ff, REAL_FOLDER, ff2))
         mask = tifffile.imread(os.path.join(CEM_MITOLAB_DIR, ff, MASK_FOLDER, ff2))
         mask = split_disconnected(mask, connectivity=2)
