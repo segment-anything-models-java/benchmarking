@@ -135,7 +135,7 @@ scores_mat = np.zeros((n_files, len(model_types) * len(promtp_types)), dtype="fl
 
 for cc in range(n_files):
     print(cc)
-    f_names.append(cc)
+    f_names.append(f"im_{cc}.png")
     mask = mask_mat[cc, :, :, 0]
     mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
     im = im_mat[cc]
