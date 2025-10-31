@@ -1,12 +1,62 @@
-import numpy as np
-import os
-import subprocess
-import random
-import tifffile
 import json
+import os
 import platform
+import random
+import subprocess
+import sys
 import tempfile
+
+import numpy as np
+import tifffile
 from skimage.measure import label as cc_label
+from PIL import Image
+
+def relabel_consecutive(mask: np.ndarray) -> np.ndarray:
+    """
+    Relabel an instance segmentation mask so that foreground labels are consecutive (1..N).
+    Background (0) is preserved as 0. Order is by ascending original label, so any
+    skipped numbers cause subsequent labels to shift down.
+
+    Examples:
+      [0,1,1,2,0,8] -> [0,1,1,2,0,3]
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Integer array of any shape. 0 is background; positive integers are object labels.
+
+    Returns
+    -------
+    np.ndarray
+        New mask with labels in 1..N (0 remains 0). Dtype chosen to safely hold N.
+    """
+    mask = np.asarray(mask)
+    if mask.size == 0:
+        return mask.copy()
+
+    # Foreground positions
+    fg = mask > 0
+    if not np.any(fg):
+        return mask.copy()
+
+    # Unique positive labels, sorted
+    uniq = np.unique(mask[fg])  # strictly > 0 and sorted
+
+    # Map each positive label to its new consecutive id:
+    # For any value v in uniq, its position in uniq is searchsorted(v),
+    # so new_id = index + 1  (1-based)
+    # This avoids building a huge lookup table up to max(label).
+    out = mask.copy()
+    out_fg = out[fg]
+    out[fg] = 1 + np.searchsorted(uniq, out_fg)
+
+    # Choose a safe integer dtype that can hold N labels
+    n = int(uniq.size)
+    safe_dtype = np.min_scalar_type(n)
+    if np.issubdtype(out.dtype, np.integer) and np.iinfo(out.dtype).max >= n:
+        return out  # original dtype can hold the result
+    else:
+        return out.astype(safe_dtype, copy=False)
 
 def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
     out = mask.copy()
@@ -69,16 +119,26 @@ else:
 f_names = []
 model_types = ["tiny", "small", "large", "eff", "effvit"]
 promtp_types = ["points", "bboxes"]
-scores_mat = np.zeros((len(os.listdir(os.path.join(CELLPOSE_DIR, REAL_FOLDER))), len(model_types) * len(promtp_types)), dtype="float64")
 
 all_files = os.listdir(os.path.join(CELLPOSE_DIR, REAL_FOLDER))
+cc = 0
+for ii, ff in enumerate(all_files[:]):
+    if "mask"in ff:
+        continue
+    cc += 1
+scores_mat = np.zeros((cc, len(model_types) * len(promtp_types)), dtype="float64")
 all_files.sort()
-for ii, ff in enumerate(all_files):
+cc = -1
+for ii, ff in enumerate(all_files[:]):
+    if "mask"in ff:
+        continue
+    cc += 1
+    print(ii, cc)
     last_point_ind = len(ff) - 1 - ff[::-1].index("_")
     mask_name = ff[:last_point_ind] + "_masks.png"
     f_names.append(ff)
-    mask_pre = tifffile.imread(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name))
-    mask = split_disconnected(mask_pre, connectivity=2)
+    mask = np.array(Image.open(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name)))
+    mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
     bboxes = []
     points = []
     for i in range(1, mask.max() + 1):
@@ -112,7 +172,7 @@ for ii, ff in enumerate(all_files):
             + f"points='{json.dumps(points)}'\n" \
             + f"tmp_path=r'{RESULTS_PATH}'\n" \
             + "".join(modified_lines)
-
+    
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as tmp_file:
         tmp_script_path = tmp_file.name
@@ -135,7 +195,7 @@ for ii, ff in enumerate(all_files):
         print(shlex.join(command))
         print("something happened")
         raise Exception()
-    os.remove(temp_script_path)
+    os.remove(tmp_script_path)
 
     for j, model_type in enumerate(model_types):
         for k, prompt_type in enumerate(promtp_types):
@@ -146,8 +206,7 @@ for ii, ff in enumerate(all_files):
                 iou = iou_diagonal_fast((mask == pn) * 1, tmp_file)
                 ious.append(iou[0])
             ious = np.array(ious)
-            scores_mat[ii, j * len(promtp_types) + k] = ious.mean()
-
+            scores_mat[cc, j * len(promtp_types) + k] = ious.mean()
 
 import polars as pl
 cols = []
