@@ -107,7 +107,7 @@ scores_mat = np.zeros((cc, len(model_types) * len(promtp_types)), dtype="float64
 all_files.sort()
 cc = -1
 for ii, ff in enumerate(all_files[:]):
-    if "mask"in ff:
+    if "mask" in ff:
         continue
     cc += 1
     print(ii, cc)
