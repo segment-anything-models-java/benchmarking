@@ -80,9 +80,9 @@ def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
 
 N_POINT_PROMPTS = 3
 
-SCRIPT_PATH = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\default.py"
+SCRIPT_PATH = "scripts/default.py"
 
-CELLPOSE_DIR = "C:\\users\\carlos\\datasets\\cellpose"
+CELLPOSE_DIR = "/home/carlos/Pictures/samj_rebuttal/cellpose/"
 REAL_FOLDER = "test"
 MASK_FOLDER = "test"
 POINT_PROMPTS = os.path.join(CELLPOSE_DIR, "point_prompts")
@@ -95,7 +95,6 @@ if not os.path.isdir(QUPATH_PATH):
 
 
 f_names = []
-model_types = ["tiny", "small", "large", "eff", "effvit"]
 promtp_types = ["points", "bboxes"]
 
 all_files = os.listdir(os.path.join(CELLPOSE_DIR, REAL_FOLDER))
@@ -104,7 +103,6 @@ for ii, ff in enumerate(all_files[:]):
     if "mask"in ff:
         continue
     cc += 1
-scores_mat = np.zeros((cc, len(model_types) * len(promtp_types)), dtype="float64")
 all_files.sort()
 cc = -1
 for ii, ff in enumerate(all_files[:]):
