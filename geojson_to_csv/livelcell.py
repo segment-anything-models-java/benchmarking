@@ -112,17 +112,17 @@ def load_geojson_masks(geojson_path: str, height: int, width: int) -> dict[str, 
 
 LIVECELL_DIR = "/home/carlos/Pictures/samj_rebuttal/livecell"
 ANN_FILE = os.path.join(LIVECELL_DIR, "livecell_coco_test.json")
-LIVELCELL_JSON_DIR = "/home/carlos/Desktop/RESULTS_QUPATH/livecell_save"
+LIVELCELL_JSON_DIR = "/home/carlos/Videos/QuPath-v0.6.0-Linux/livecell/results/livecell_save"
 RES_FILE = "/home/carlos/eclipse-workspace-test/scripts/res_qupath_second/livecell.csv"
 os.makedirs(os.path.dirname(RES_FILE), exist_ok=True)
 
 models = [
-    #"sam2_tiny",
-    #"sam2_small",
+    "sam2_tiny",
+    "sam2_small",
     #"sam2_base",
-    "vit_h_em",
+    #"vit_h_em",
     #"vit_h_lm",
-    #"vit_t",
+    "vit_t",
 ]
 
 promtp_types = ["points", "rect"]
@@ -156,7 +156,7 @@ for row_idx, coco_info in enumerate(imgs):
         try:
             roi_masks = load_geojson_masks(gm_path, H, W)
         except FileNotFoundError:
-            print("Missing GeoJSON:", gm_path)
+            #print("Missing GeoJSON:", gm_path)
             continue
 
         for k, prompt_name in enumerate(promtp_types):

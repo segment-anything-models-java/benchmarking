@@ -1,0 +1,204 @@
+import json
+import os
+import platform
+import random
+import subprocess
+import sys
+import tempfile
+
+import numpy as np
+import tifffile
+from skimage.measure import label as cc_label
+
+import polars as pl
+
+def relabel_consecutive(mask: np.ndarray) -> np.ndarray:
+    """
+    Relabel an instance segmentation mask so that foreground labels are consecutive (1..N).
+    Background (0) is preserved as 0. Order is by ascending original label, so any
+    skipped numbers cause subsequent labels to shift down.
+
+    Examples:
+      [0,1,1,2,0,8] -> [0,1,1,2,0,3]
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Integer array of any shape. 0 is background; positive integers are object labels.
+
+    Returns
+    -------
+    np.ndarray
+        New mask with labels in 1..N (0 remains 0). Dtype chosen to safely hold N.
+    """
+    mask = np.asarray(mask)
+    if mask.size == 0:
+        return mask.copy()
+
+    # Foreground positions
+    fg = mask > 0
+    if not np.any(fg):
+        return mask.copy()
+
+    # Unique positive labels, sorted
+    uniq = np.unique(mask[fg])  # strictly > 0 and sorted
+
+    # Map each positive label to its new consecutive id:
+    # For any value v in uniq, its position in uniq is searchsorted(v),
+    # so new_id = index + 1  (1-based)
+    # This avoids building a huge lookup table up to max(label).
+    out = mask.copy()
+    out_fg = out[fg]
+    out[fg] = 1 + np.searchsorted(uniq, out_fg)
+
+    # Choose a safe integer dtype that can hold N labels
+    n = int(uniq.size)
+    safe_dtype = np.min_scalar_type(n)
+    if np.issubdtype(out.dtype, np.integer) and np.iinfo(out.dtype).max >= n:
+        return out  # original dtype can hold the result
+    else:
+        return out.astype(safe_dtype, copy=False)
+
+def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
+    out = mask.copy()
+    next_id = int(out.max()) + 1
+    for lab in np.unique(out):
+        if lab == 0:
+            continue
+        cc = cc_label(out == lab, connectivity=connectivity)
+        n = int(cc.max())
+        if n <= 1:
+            continue
+        sizes = np.bincount(cc.ravel())[1:]     # sizes of components 1..n
+        keep = int(sizes.argmax() + 1)          # largest keeps original label
+        for c in range(1, n + 1):
+            if c != keep:
+                out[cc == c] = next_id
+                next_id += 1
+    return out
+
+
+
+def iou_diagonal_fast(gt, pred):
+    n = gt.max()
+    ious = np.empty(n)
+    for i in range(1, n + 1):
+        mask = (gt == i) | (pred == i)
+        inter = np.count_nonzero((gt == i) & (pred == i))
+        ious[i - 1] = inter / np.count_nonzero(mask)
+    return ious
+
+
+N_POINT_PROMPTS = 3
+
+SCRIPT_PATH = "/home/carlos/eclipse-workspace-test/scripts/speed_bench/default_fiji_jython.py"
+
+DEEPBACS_DIR = "/home/carlos/Pictures/samj_rebuttal/deepbacs/ims/"
+REAL_FOLDER = "src"
+MASK_FOLDER = "mask"
+
+MAX_STR_LEN = 20_000
+
+FIJI_PATH = "/home/carlos/Desktop/Fiji.app"
+
+if platform.system() == "Linux":
+    FIJI_EXEC = "ImageJ-linux64"
+elif platform.system() == "Windows":
+    FIJI_EXEC = "ImageJ-win64.exe"
+elif platform.system() == "Darwin":  # macOS
+    FIJI_EXEC = " Contents/MacOS/ImageJ-macos-x64"
+elif platform.system() == "Darwin" and ("arm64" in platform.machine() or "aarch64" in platform.machine()):  # macOS
+    FIJI_EXEC = " Contents/MacOS/fiji-macos-arm64"
+else:
+    raise RuntimeError(f"Unsupported OS: {platform.system()}")
+
+
+f_names = []
+model_types = ["tiny", "small", "large", "eff", "effvit"]
+promtp_types = ["points", "bboxes"]
+
+all_files = os.listdir(os.path.join(DEEPBACS_DIR, REAL_FOLDER))
+all_files.sort()
+
+cc = -1
+for ff in (all_files[:1]):
+        cc += 1
+        print(cc)
+        f_names.append(ff)
+        im = tifffile.imread(os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff))
+        mask = tifffile.imread(os.path.join(DEEPBACS_DIR, MASK_FOLDER, ff))
+        mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
+
+        bboxes = []
+        points = []
+        for i in range(1, mask.max() + 1):
+            m = mask == i
+            inds = np.where(m)
+            bottom, top = int(inds[0].min()), int(inds[0].max())
+            left, right = int(inds[1].min()), int(inds[1].max())
+            # bboxes.append([[left, bottom, right - left, top - bottom]])
+            bboxes.extend([[left, bottom, right - left + 1, top - bottom + 1]])
+
+            point_inds = random.sample(
+                range(inds[0].shape[0]),
+                np.min([N_POINT_PROMPTS, inds[0].shape[0]]),
+            )
+            xs = inds[1][point_inds]
+            ys = inds[0][point_inds]
+            pps = []
+            for j in range(N_POINT_PROMPTS):
+                # pps.append([[int(xs[j]), int(ys[j])]])
+                if j >= inds[0].shape[0]:
+                    pps.append([int(-1), int(-1)])
+                    continue
+                pps.append([int(xs[j]), int(ys[j])])
+
+            # points.append([pps])
+            points.append(pps)
+
+        with open(os.path.join(os.getcwd(), SCRIPT_PATH)) as og_script:
+            script_content = og_script.read()
+        bboxes_str = "\"" + json.dumps(bboxes) + "\""
+        points_str = "\"" + json.dumps(points) + "\""
+        if len(bboxes_str) > MAX_STR_LEN:
+            with open(os.path.join(RESULTS_PATH, "bboxes.json"), "w") as f:
+                json.dump(bboxes, f, indent=2)
+                bboxes_str = f"json.dumps(json.load(open(r'{os.path.join(RESULTS_PATH, 'bboxes.json')}')))"
+        if len(points_str) > MAX_STR_LEN:
+            with open(os.path.join(RESULTS_PATH, "points.json"), "w") as f:
+                json.dump(points, f, indent=2)
+                points_str = f"json.dumps(json.load(open(r'{os.path.join(RESULTS_PATH, 'points.json')}')))"
+        script_content = (
+            f"import json\n"
+            f"im_path=r'{os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff)}'\n"
+            f"bboxes={bboxes_str}\npoints={points_str}\n"
+            f"tmp_path=r'{RESULTS_PATH}'\n"
+            + script_content
+        )
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode="w") as temp_script:
+            temp_script.write(script_content)
+            temp_script_path = temp_script.name
+
+        command = [
+            os.path.join(FIJI_PATH, FIJI_EXEC),
+            "--ij2",
+            "--headless",
+            "--console",
+            "--run",
+            temp_script_path,
+        ]
+
+        # Run the command
+        result = subprocess.run(command, capture_output=True, text=True)
+        if "[ERROR]" in result.stderr:
+            result = subprocess.run(command, capture_output=True, text=True)
+            if "[ERROR]" in result.stderr:
+                import shlex
+
+                print(shlex.join(command))
+                print(result.stderr, file=sys.stderr)
+                raise Exception()
+
+        os.remove(temp_script_path)
+
