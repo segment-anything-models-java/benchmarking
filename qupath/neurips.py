@@ -78,50 +78,38 @@ def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
 
 
 
-N_POINT_PROMPTS = 3
+NEURIPS_DIR = "/home/carlos/Pictures/samj_rebuttal/neurips/Testing/Public"
+REAL_FOLDER = "images"
+MASK_FOLDER = "labels"
 
+POINT_PROMPTS = os.path.join(os.path.abspath(os.path.join(os.path.dirname(NEURIPS_DIR), '..')), "point_prompts")
+if not os.path.isdir(POINT_PROMPTS):
+    os.makedirs(POINT_PROMPTS)
 
-CELLPOSE_DIR = "/home/carlos/Pictures/samj_rebuttal/cellpose/"
-REAL_FOLDER = "test"
-MASK_FOLDER = "test"
-POINT_PROMPTS = os.path.join(CELLPOSE_DIR, "point_prompts")
-
-QUPATH_PATH = os.path.join(CELLPOSE_DIR, "qupath")
+QUPATH_PATH = os.path.join(NEURIPS_DIR, "qupath")
 
 if not os.path.isdir(QUPATH_PATH):
     os.makedirs(QUPATH_PATH)
 
-
-
 f_names = []
-model_types = ["tiny", "small", "large", "eff", "effvit"]
-promtp_types = ["points", "bboxes"]
+all_files_im = os.listdir(os.path.join(NEURIPS_DIR, REAL_FOLDER))
+all_files_im.sort()
 
-all_files = os.listdir(os.path.join(CELLPOSE_DIR, REAL_FOLDER))
-cc = 0
-for ii, ff in enumerate(all_files[:]):
-    if "mask"in ff:
-        continue
-    cc += 1
-scores_mat = np.zeros((cc, len(model_types) * len(promtp_types)), dtype="float64")
-all_files.sort()
-cc = -1
-for ii, ff in enumerate(all_files[:]):
-    if "mask" in ff:
-        continue
-    cc += 1
-    print(ii, cc)
-    last_point_ind = len(ff) - 1 - ff[::-1].index("_")
-    mask_name = ff[:last_point_ind] + "_masks.png"
-    f_names.append(ff)
-    mask = np.array(Image.open(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name)))
+for cc, ff in enumerate(all_files_im):
+    print(cc)
+    last_point_ind = len(ff) - 1 - ff[::-1].index(".")
+    mask_name = ff[:last_point_ind] + "_label.tiff"
+    mask = tifffile.imread(os.path.join(NEURIPS_DIR, MASK_FOLDER, mask_name))
     mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
-    #np.save(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name), mask)
+
     bboxes = []
+    # for i in range(33, 34):
     for i in range(1, mask.max() + 1):
-        inds = np.where(mask == i)
+        m = mask == i
+        inds = np.where(m)
         bottom, top = int(inds[0].min()), int(inds[0].max())
         left, right = int(inds[1].min()), int(inds[1].max())
+        # bboxes.append([[left, bottom, right - left, top - bottom]])
         bboxes.extend([[left, bottom, right - left + 1, top - bottom + 1]])
 
     points = np.load(os.path.join(POINT_PROMPTS, ff + ".npy"))

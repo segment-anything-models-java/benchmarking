@@ -190,6 +190,8 @@ LIVECELL_DIR = "C:\\users\\carlos\\datasets\\livecell"
 REAL_FOLDER = "livecell_test_images"
 QUPATH_PATH = os.path.join(LIVECELL_DIR, "qupath")
 ANN_FILE = os.path.join(LIVECELL_DIR, "livecell_coco_test.json")
+RES_DIR = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\res_microsam\\livecell.csv"
+os.makedirs(os.path.dirname(RES_DIR), exist_ok=True)
 
 
 
@@ -209,7 +211,7 @@ promtp_types = ["points", "bboxes"]
 
 coco = COCO(ANN_FILE)
 
-n_ims = len(coco.loadImgs(coco.getImgIds()))
+n_ims = len(os.listdir(QUPATH_PATH)) // 2
 scores_mat = np.zeros((n_ims, len(model_types) * len(promtp_types)), dtype="float64")
 
 
@@ -232,12 +234,20 @@ rect_prompt_layer = viewer.add_shapes(
     face_color="transparent", shape_type='rectangle', edge_color="green", edge_width=4, name="prompts", ndim=2,
 )
 for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())):
+    cc += 1
     print(ii)
     ff = coco_info["file_name"]
+    if ff in f_names:
+        f_names.append("empty")
+        continue
     f_names.append(ff)
     im = tifffile.imread(os.path.join(LIVECELL_DIR, REAL_FOLDER, coco_info["file_name"]))
     ann_ids = coco.getAnnIds(imgIds=[coco_info["id"]])
     anns = coco.loadAnns(ann_ids)
+    if not os.path.exists(os.path.join(QUPATH_PATH, f"point_prompts_{ff}.json")):
+        f_names = f_names[:-1]
+        cc -= 1
+        continue
     
     with open(os.path.join(QUPATH_PATH, f"point_prompts_{ff}.json"), "r") as f:
         point_prompts = json.load(f)
@@ -259,7 +269,7 @@ for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())):
         for ip, pp in enumerate(point_prompts):
             point_prompt_layer.data = np.array([[b, a] for a, b in pp])
             seg = segment(viewer=viewer)
-            iou = iou_diagonal_fast(coco.annToMask(anns[ip + 1]), seg)
+            iou = iou_diagonal_fast(coco.annToMask(anns[ip]), seg)
             ious.append(iou[0])
         point_prompt_layer.data = None
 
@@ -278,11 +288,12 @@ for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())):
             seg = segment(viewer=viewer)
             if len(seg.shape) == 3:
                 seg = seg[:, :, 0]
-            iou = iou_diagonal_fast(anns[ip + 1], seg)
+            iou = iou_diagonal_fast(coco.annToMask(anns[ib]), seg)
             ious.append(iou[0])
         rect_prompt_layer.data = np.array([])
         ious = np.array(ious)
         scores_mat[cc, j * len(promtp_types) + 1] = ious.mean()
+    print(scores_mat[cc])
     viewer.layers.remove("image")
 
 cols = []
@@ -292,4 +303,4 @@ for model_type in (model_types):
 
 df = pl.DataFrame(scores_mat, schema=cols)
 df = df.with_columns(pl.Series("file_names", f_names))
-df.write_csv("/home/carlos/git/benchmarking/res_microsam/cellpose.csv")
+df.write_csv(RES_DIR)

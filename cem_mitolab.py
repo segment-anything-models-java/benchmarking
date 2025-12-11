@@ -10,6 +10,8 @@ import numpy as np
 import tifffile
 from skimage.measure import label as cc_label
 
+import polars as pl
+
 def relabel_consecutive(mask: np.ndarray) -> np.ndarray:
     """
     Relabel an instance segmentation mask so that foreground labels are consecutive (1..N).
@@ -89,9 +91,9 @@ def iou_diagonal_fast(gt, pred):
 
 N_POINT_PROMPTS = 3
 
-SCRIPT_PATH = "scripts/default.py"
+SCRIPT_PATH = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\default.py"
 
-CEM_MITOLAB_DIR = "/home/carlos/Pictures/samj_rebuttal/mito_em/11037/data/cem_mitolab"
+CEM_MITOLAB_DIR = r'C:\Users\carlos\datasets\cem_mitolab\cem_mitolab\11037\data\cem_mitolab\cem_mitolab'
 REAL_FOLDER = "images"
 MASK_FOLDER = "masks"
 
@@ -104,7 +106,7 @@ if not os.path.isdir(POINT_PROMPTS):
 
 MAX_STR_LEN = 20_000
 
-FIJI_PATH = "/home/carlos/Desktop/Fiji.app"
+FIJI_PATH = "C:\\Users\\carlos\\Desktop\\fiji-stable-win64-jdk\\Fiji.app"
 
 if platform.system() == "Linux":
     FIJI_EXEC = "ImageJ-linux64"
@@ -125,13 +127,15 @@ promtp_types = ["points", "bboxes"]
 all_files = os.listdir(CEM_MITOLAB_DIR)
 all_files.sort()
 cc = 0
-for ff in (all_files):
+for _, ff in enumerate(all_files):
     all_file_2 = os.listdir(os.path.join(CEM_MITOLAB_DIR, ff, REAL_FOLDER))
     all_file_2.sort()
-    for ff2 in all_file_2:
+    for __, ff2 in enumerate(all_file_2):
         cc += 1
 scores_mat = np.zeros((cc, len(model_types) * len(promtp_types)), dtype="float64")
 
+prev_calculated = pl.read_csv("C:\\Users\\carlos\\git\\benchmarking\\res\\cem_mitolab.csv")
+already_fnames = prev_calculated["file_names"].to_list()
 cc = -1
 for ff in (all_files):
     all_file_2 = os.listdir(os.path.join(CEM_MITOLAB_DIR, ff, REAL_FOLDER))
@@ -140,13 +144,14 @@ for ff in (all_files):
         cc += 1
         print(cc)
         f_names.append(ff + "______" + ff2)
+        if (ff + "______" + ff2) in already_fnames:
+            continue
         im = tifffile.imread(os.path.join(CEM_MITOLAB_DIR, ff, REAL_FOLDER, ff2))
         mask = tifffile.imread(os.path.join(CEM_MITOLAB_DIR, ff, MASK_FOLDER, ff2))
         mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
 
         bboxes = []
         points = []
-        # for i in range(33, 34):
         for i in range(1, mask.max() + 1):
             m = mask == i
             inds = np.where(m)
@@ -209,27 +214,45 @@ for ff in (all_files):
         # Run the command
         result = subprocess.run(command, capture_output=True, text=True)
         if "[ERROR]" in result.stderr:
-            import shlex
+            result = subprocess.run(command, capture_output=True, text=True)
+            if "[ERROR]" in result.stderr:
+                import shlex
 
-            print(shlex.join(command))
-            print(result.stderr, file=sys.stderr)
-            raise Exception()
+                print(shlex.join(command))
+                print(result.stderr, file=sys.stderr)
+                raise Exception()
 
-        os.remove(temp_script_path)
         for j, model_type in enumerate(model_types):
             for k, prompt_type in enumerate(promtp_types):
                 ious = []
-                for pn in range(1, mask.max() + 1):
-                    path_to_tmp = os.path.join(
-                        RESULTS_PATH, f"pred_{model_type}_{prompt_type}_{pn - 1}.npy"
-                    )
-                    tmp_file = np.load(path_to_tmp).T
-                    iou = iou_diagonal_fast((mask == pn) * 1, tmp_file)
-                    ious.append(iou[0])
-                ious = np.array(ious)
-                scores_mat[cc, j * len(promtp_types) + k] = ious.mean()
+                try:
+                    for pn in range(1, mask.max() + 1):
+                        path_to_tmp = os.path.join(
+                            RESULTS_PATH, f"pred_{model_type}_{prompt_type}_{pn - 1}.npy"
+                        )
+                        tmp_file = np.load(path_to_tmp).T
+                        iou = iou_diagonal_fast((mask == pn) * 1, tmp_file)
+                        ious.append(iou[0])
+                    ious = np.array(ious)
+                    scores_mat[cc, j * len(promtp_types) + k] = ious.mean()
+                except Exception as e:
+                    scores_mat[cc, j * len(promtp_types) + k] = np.nan
 
-import polars as pl
+        os.remove(temp_script_path)
+
+        if cc % 50 != 0:
+            continue
+        cols = []
+        for model_type in (model_types):
+            for prompt_type in (promtp_types):
+                cols.append(f"{model_type}_{prompt_type}")
+
+        df = pl.DataFrame(scores_mat[:len(f_names)], schema=cols)
+        df = df.with_columns(pl.Series("file_names", f_names))
+        df.write_csv("C:\\Users\\carlos\\git\\benchmarking\\res\\cem_mitolab2.csv")
+
+
+
 
 cols = []
 for model_type in (model_types):
@@ -238,4 +261,4 @@ for model_type in (model_types):
 
 df = pl.DataFrame(scores_mat, schema=cols)
 df = df.with_columns(pl.Series("file_names", f_names))
-df.write_csv("cem_mitolab.csv")
+df.write_csv("C:\\Users\\carlos\\git\\benchmarking\\res\\cem_mitolab2.csv")

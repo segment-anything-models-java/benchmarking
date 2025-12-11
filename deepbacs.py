@@ -1,11 +1,63 @@
-import numpy as np
-import os
-import subprocess
-import random
-import tifffile
 import json
+import os
 import platform
+import random
+import subprocess
+import sys
+import tempfile
+
+import numpy as np
+import tifffile
 from skimage.measure import label as cc_label
+
+import polars as pl
+
+def relabel_consecutive(mask: np.ndarray) -> np.ndarray:
+    """
+    Relabel an instance segmentation mask so that foreground labels are consecutive (1..N).
+    Background (0) is preserved as 0. Order is by ascending original label, so any
+    skipped numbers cause subsequent labels to shift down.
+
+    Examples:
+      [0,1,1,2,0,8] -> [0,1,1,2,0,3]
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Integer array of any shape. 0 is background; positive integers are object labels.
+
+    Returns
+    -------
+    np.ndarray
+        New mask with labels in 1..N (0 remains 0). Dtype chosen to safely hold N.
+    """
+    mask = np.asarray(mask)
+    if mask.size == 0:
+        return mask.copy()
+
+    # Foreground positions
+    fg = mask > 0
+    if not np.any(fg):
+        return mask.copy()
+
+    # Unique positive labels, sorted
+    uniq = np.unique(mask[fg])  # strictly > 0 and sorted
+
+    # Map each positive label to its new consecutive id:
+    # For any value v in uniq, its position in uniq is searchsorted(v),
+    # so new_id = index + 1  (1-based)
+    # This avoids building a huge lookup table up to max(label).
+    out = mask.copy()
+    out_fg = out[fg]
+    out[fg] = 1 + np.searchsorted(uniq, out_fg)
+
+    # Choose a safe integer dtype that can hold N labels
+    n = int(uniq.size)
+    safe_dtype = np.min_scalar_type(n)
+    if np.issubdtype(out.dtype, np.integer) and np.iinfo(out.dtype).max >= n:
+        return out  # original dtype can hold the result
+    else:
+        return out.astype(safe_dtype, copy=False)
 
 def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
     out = mask.copy()
@@ -25,101 +77,175 @@ def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
                 next_id += 1
     return out
 
+
+
 def iou_diagonal_fast(gt, pred):
     n = gt.max()
     ious = np.empty(n)
-    for i in range(1, n+1):
+    for i in range(1, n + 1):
         mask = (gt == i) | (pred == i)
         inter = np.count_nonzero((gt == i) & (pred == i))
-        ious[i-1] = inter / np.count_nonzero(mask)
+        ious[i - 1] = inter / np.count_nonzero(mask)
     return ious
 
 
+N_POINT_PROMPTS = 3
 
-N_POINT_PROMPTS = 1
+SCRIPT_PATH = "/home/carlos/eclipse-workspace-test/scripts/scripts/default.py"
 
-SCRIPT_PATH = "scripts/deepbacs.py"
+DEEPBACS_DIR = "/home/carlos/Pictures/samj_rebuttal/deepbacs/ims/"
+REAL_FOLDER = "src"
+MASK_FOLDER = "mask"
 
-DEEPBACS_DIR = "/home/carlos/Pictures/samj_rebuttal/deepbacs/test/"
-REAL_FOLDER = "brightfield"
-MASK_FOLDER = "masks_RoiMap"
-RESULTS_PATH = os.path.join(os.getcwd(), "tmp")
+RESULTS_PATH = os.path.join(os.getcwd(), "tmp_deepbacs")
 if not os.path.isdir(RESULTS_PATH):
     os.makedirs(RESULTS_PATH)
+POINT_PROMPTS = os.path.join(os.path.abspath(os.path.join(os.path.dirname(DEEPBACS_DIR), '..')), "point_prompts")
+if not os.path.isdir(POINT_PROMPTS):
+    os.makedirs(POINT_PROMPTS)
+
+MAX_STR_LEN = 20_000
 
 FIJI_PATH = "/home/carlos/Desktop/Fiji.app"
 
 if platform.system() == "Linux":
     FIJI_EXEC = "ImageJ-linux64"
 elif platform.system() == "Windows":
-    FIJI_EXEC = "fiji-windows-x64.exe"
+    FIJI_EXEC = "ImageJ-win64.exe"
 elif platform.system() == "Darwin":  # macOS
-    FIJI_EXEC = " Contents/MacOS/fiji-macos-x64"
+    FIJI_EXEC = " Contents/MacOS/ImageJ-macos-x64"
 elif platform.system() == "Darwin" and ("arm64" in platform.machine() or "aarch64" in platform.machine()):  # macOS
     FIJI_EXEC = " Contents/MacOS/fiji-macos-arm64"
 else:
     raise RuntimeError(f"Unsupported OS: {platform.system()}")
 
 
-
 f_names = []
 model_types = ["tiny", "small", "large", "eff", "effvit"]
 promtp_types = ["points", "bboxes"]
-scores_mat = np.zeros((len(os.listdir(os.path.join(DEEPBACS_DIR, REAL_FOLDER))), len(model_types) * len(promtp_types)), dtype="float64")
 
-for ii, ff in enumerate(os.listdir(os.path.join(DEEPBACS_DIR, REAL_FOLDER))):
-    mask_pre = tifffile.imread(os.path.join(DEEPBACS_DIR, MASK_FOLDER, ff))
-    mask = split_disconnected(mask_pre, connectivity=2)
-    im = tifffile.imread(os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff))
-    bboxes = []
-    points = []
-    #for i in range(33, 34):
-    for i in range(1, mask.max() + 1):
-        inds = np.where(mask == i)
-        bottom, top = int(inds[0].min()), int(inds[0].max())
-        left, right = int(inds[1].min()), int(inds[1].max())
-        #bboxes.append([[left, bottom, right - left, top - bottom]])
-        bboxes.extend([[left, bottom, right - left + 1, top - bottom + 1]])
+all_files = os.listdir(os.path.join(DEEPBACS_DIR, REAL_FOLDER))
+all_files.sort()
+scores_mat = np.zeros((len(all_files), len(model_types) * len(promtp_types)), dtype="float64")
 
-        point_inds = random.sample(range(inds[0].shape[0]), N_POINT_PROMPTS)
-        xs = inds[1][point_inds]
-        ys = inds[0][point_inds]
-        pps = []
-        for j in range(N_POINT_PROMPTS):
-            #pps.append([[int(xs[j]), int(ys[j])]])
-            pps.append([int(xs[j]), int(ys[j])])
+cc = -1
+for ff in (all_files):
+        cc += 1
+        print(cc)
+        f_names.append(ff)
+        im = tifffile.imread(os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff))
+        mask = tifffile.imread(os.path.join(DEEPBACS_DIR, MASK_FOLDER, ff))
+        mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
 
-        #points.append([pps])
-        points.extend(pps)
+        bboxes = []
+        points = []
+        for i in range(1, mask.max() + 1):
+            m = mask == i
+            inds = np.where(m)
+            bottom, top = int(inds[0].min()), int(inds[0].max())
+            left, right = int(inds[1].min()), int(inds[1].max())
+            # bboxes.append([[left, bottom, right - left, top - bottom]])
+            bboxes.extend([[left, bottom, right - left + 1, top - bottom + 1]])
 
-    command = [
-        os.path.join(FIJI_PATH, FIJI_EXEC),
-        "--ij2",
-        "--headless",
-        "--console",
-        "--run",
-        os.path.join(os.getcwd(), SCRIPT_PATH),
-        f"im_path=\"{os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff)}\", bboxes=\"{json.dumps(bboxes)}\", points=\"{json.dumps(points)}\", " \
-        + f"tmp_path=\"{RESULTS_PATH}\""
-    ]
+            point_inds = random.sample(
+                range(inds[0].shape[0]),
+                np.min([N_POINT_PROMPTS, inds[0].shape[0]]),
+            )
+            xs = inds[1][point_inds]
+            ys = inds[0][point_inds]
+            pps = []
+            for j in range(N_POINT_PROMPTS):
+                # pps.append([[int(xs[j]), int(ys[j])]])
+                if j >= inds[0].shape[0]:
+                    pps.append([int(-1), int(-1)])
+                    continue
+                pps.append([int(xs[j]), int(ys[j])])
+
+            # points.append([pps])
+            points.append(pps)
+        np.save(os.path.join(POINT_PROMPTS, ff + ".npy"), np.array(points))
+
+        with open(os.path.join(os.getcwd(), SCRIPT_PATH)) as og_script:
+            script_content = og_script.read()
+        bboxes_str = "\"" + json.dumps(bboxes) + "\""
+        points_str = "\"" + json.dumps(points) + "\""
+        if len(bboxes_str) > MAX_STR_LEN:
+            with open(os.path.join(RESULTS_PATH, "bboxes.json"), "w") as f:
+                json.dump(bboxes, f, indent=2)
+                bboxes_str = f"json.dumps(json.load(open(r'{os.path.join(RESULTS_PATH, 'bboxes.json')}')))"
+        if len(points_str) > MAX_STR_LEN:
+            with open(os.path.join(RESULTS_PATH, "points.json"), "w") as f:
+                json.dump(points, f, indent=2)
+                points_str = f"json.dumps(json.load(open(r'{os.path.join(RESULTS_PATH, 'points.json')}')))"
+        script_content = (
+            f"import json\n"
+            f"im_path=r'{os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff)}'\n"
+            f"bboxes={bboxes_str}\npoints={points_str}\n"
+            f"tmp_path=r'{RESULTS_PATH}'\n"
+            + script_content
+        )
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode="w") as temp_script:
+            temp_script.write(script_content)
+            temp_script_path = temp_script.name
+
+        command = [
+            os.path.join(FIJI_PATH, FIJI_EXEC),
+            "--ij2",
+            "--headless",
+            "--console",
+            "--run",
+            temp_script_path,
+        ]
+
+        # Run the command
+        result = subprocess.run(command, capture_output=True, text=True)
+        if "[ERROR]" in result.stderr:
+            result = subprocess.run(command, capture_output=True, text=True)
+            if "[ERROR]" in result.stderr:
+                import shlex
+
+                print(shlex.join(command))
+                print(result.stderr, file=sys.stderr)
+                raise Exception()
+
+        for j, model_type in enumerate(model_types):
+            for k, prompt_type in enumerate(promtp_types):
+                ious = []
+                try:
+                    for pn in range(1, mask.max() + 1):
+                        path_to_tmp = os.path.join(
+                            RESULTS_PATH, f"pred_{model_type}_{prompt_type}_{pn - 1}.npy"
+                        )
+                        tmp_file = np.load(path_to_tmp).T
+                        iou = iou_diagonal_fast((mask == pn) * 1, tmp_file)
+                        ious.append(iou[0])
+                    ious = np.array(ious)
+                    scores_mat[cc, j * len(promtp_types) + k] = ious.mean()
+                except Exception as e:
+                    scores_mat[cc, j * len(promtp_types) + k] = np.nan
+
+        os.remove(temp_script_path)
+
+        if cc % 50 != 0:
+            continue
+        cols = []
+        for model_type in (model_types):
+            for prompt_type in (promtp_types):
+                cols.append(f"{model_type}_{prompt_type}")
+
+        df = pl.DataFrame(scores_mat[:len(f_names)], schema=cols)
+        df = df.with_columns(pl.Series("file_names", f_names))
+        df.write_csv("/home/carlos/eclipse-workspace-test/scripts/res/deepbacs.csv")
 
 
-    # Run the command
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode != 0:
-        import shlex
-        print(shlex.join(command))
-        print("something happened")
-        raise Exception()
 
-    for j, model_type in enumerate(model_types):
-        for k, prompt_type in enumerate(promtp_types):
-            ious = []
-            for pn in range(1, mask.max() + 1):
-                path_to_tmp = os.path.join(RESULTS_PATH, f"pred_{model_type}_{prompt_type}_{pn - 1}.npy")
-                tmp_file = np.load(path_to_tmp).T
-                iou = iou_diagonal_fast((mask == pn) * 1, tmp_file)
-                ious.append(iou[0])
-            ious = np.array(ious)
-            scores_mat[ii, j * len(promtp_types) + k] = ious.mean()
-np.save("deepbacs.npy", scores_mat)
+
+cols = []
+for model_type in (model_types):
+    for prompt_type in (promtp_types):
+        cols.append(f"{model_type}_{prompt_type}")
+
+df = pl.DataFrame(scores_mat, schema=cols)
+df = df.with_columns(pl.Series("file_names", f_names))
+df.write_csv("/home/carlos/eclipse-workspace-test/scripts/res/deepbacs.csv")

@@ -5,7 +5,6 @@ import random
 import subprocess
 import sys
 import tempfile
-from pycocotools.coco import COCO
 
 import numpy as np
 import tifffile
@@ -79,62 +78,42 @@ def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
 
 
 
-N_POINT_PROMPTS = 3
+DEEPBACS_DIR = "/home/carlos/Pictures/samj_rebuttal/deepbacs/ims/"
+REAL_FOLDER = "src"
+MASK_FOLDER = "mask"
 
-SCRIPT_PATH = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\default.py"
-
-
-LIVECELL_DIR = "C:\\users\\carlos\\datasets\\livecell"
-REAL_FOLDER = "livecell_test_images"
-ANN_FILE = os.path.join(LIVECELL_DIR, "livecell_coco_test.json")
-RESULTS_PATH = os.path.join(os.getcwd(), "tmp")
-if not os.path.isdir(RESULTS_PATH):
-    os.makedirs(RESULTS_PATH)
-POINT_PROMPTS = os.path.join(LIVECELL_DIR, "point_prompts")
+POINT_PROMPTS = os.path.join(DEEPBACS_DIR, "../point_prompts")
 if not os.path.isdir(POINT_PROMPTS):
     os.makedirs(POINT_PROMPTS)
 
-QUPATH_PATH = os.path.join(LIVECELL_DIR, "qupath")
+QUPATH_PATH = os.path.join(DEEPBACS_DIR, "qupath")
 
 if not os.path.isdir(QUPATH_PATH):
     os.makedirs(QUPATH_PATH)
 
-
-
-coco = COCO(ANN_FILE)
-
-
 f_names = []
-model_types = ["tiny", "small", "large", "eff", "effvit"]
-promtp_types = ["points", "bboxes"]
+all_files = os.listdir(os.path.join(DEEPBACS_DIR, MASK_FOLDER))
+all_files.sort()
 
-n_ims = len(coco.loadImgs(coco.getImgIds()))
-scores_mat = np.zeros((n_ims, len(model_types) * len(promtp_types)), dtype="float64")
-
-
-
-for ii, coco_info in enumerate(coco.loadImgs(coco.getImgIds())[:]):
-    print(ii)
-    f_names.append(coco_info["file_name"])
-    im = tifffile.imread(os.path.join(LIVECELL_DIR, REAL_FOLDER, coco_info["file_name"]))
-
-    H, W = coco_info["height"], coco_info["width"]
-    ann_ids = coco.getAnnIds(imgIds=[coco_info["id"]])
-    anns = coco.loadAnns(ann_ids)
+for cc, ff in enumerate(all_files):
+    print(cc)
+    f_names.append(ff)
+    mask = tifffile.imread(os.path.join(DEEPBACS_DIR, MASK_FOLDER, ff))
+    mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
 
     bboxes = []
-    points = []
-    #for i in range(33, 34):
-    for i, ann in enumerate(anns, start=1):
-        m = coco.annToMask(ann).astype(bool)
+    # for i in range(33, 34):
+    for i in range(1, mask.max() + 1):
+        m = mask == i
         inds = np.where(m)
         bottom, top = int(inds[0].min()), int(inds[0].max())
         left, right = int(inds[1].min()), int(inds[1].max())
-        #bboxes.append([[left, bottom, right - left, top - bottom]])
+        # bboxes.append([[left, bottom, right - left, top - bottom]])
         bboxes.extend([[left, bottom, right - left + 1, top - bottom + 1]])
-    points = np.load(os.path.join(POINT_PROMPTS, coco_info["file_name"] + ".npy"))
-    with open(os.path.join(QUPATH_PATH, f"point_prompts_{coco_info['file_name']}.json"), "w") as f:
+
+    points = np.load(os.path.join(POINT_PROMPTS, ff + ".npy"))
+    with open(os.path.join(QUPATH_PATH, f"point_prompts_{ff}.json"), "w") as f:
         json.dump(points.tolist(), f)
-    with open(os.path.join(QUPATH_PATH, f"bbox_prompts_{coco_info['file_name']}.json"), "w") as f:
+    with open(os.path.join(QUPATH_PATH, f"bbox_prompts_{ff}.json"), "w") as f:
         json.dump(bboxes, f)
 print("Done!")

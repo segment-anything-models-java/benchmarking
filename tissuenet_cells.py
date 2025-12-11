@@ -10,6 +10,7 @@ import numpy as np
 import tifffile
 from skimage.measure import label as cc_label
 from PIL import Image
+import polars as pl
 
 def relabel_consecutive(mask: np.ndarray) -> np.ndarray:
     """
@@ -94,9 +95,9 @@ NAME = "TISSUENET_CELLS"
 
 N_POINT_PROMPTS = 3
 
-SCRIPT_PATH = "scripts/default.py"
+SCRIPT_PATH = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\default.py"
 
-TN_DIR = "/home/carlos/Pictures/samj_rebuttal/tissuenet/"
+TN_DIR = r'C:\Users\carlos\datasets\tissuenet'
 REAL_FOLDER = "cell_ims"
 if not os.path.isdir(os.path.join(TN_DIR, REAL_FOLDER)):
     os.makedirs(os.path.join(TN_DIR, REAL_FOLDER))
@@ -104,13 +105,13 @@ if not os.path.isdir(os.path.join(TN_DIR, REAL_FOLDER)):
 RESULTS_PATH = os.path.join(os.getcwd(), f"tmp_{NAME}")
 if not os.path.isdir(RESULTS_PATH):
     os.makedirs(RESULTS_PATH)
-POINT_PROMPTS = os.path.join(TN_DIR, "point_prompts")
+POINT_PROMPTS = os.path.join(TN_DIR, "point_prompts_cells")
 if not os.path.isdir(POINT_PROMPTS):
     os.makedirs(POINT_PROMPTS)
 
 MAX_STR_LEN = 20_000
 
-FIJI_PATH = "/home/carlos/Desktop/Fiji.app"
+FIJI_PATH = "C:\\Users\\carlos\\Desktop\\fiji-stable-win64-jdk\\Fiji.app"
 
 if platform.system() == "Linux":
     FIJI_EXEC = "ImageJ-linux64"
@@ -212,11 +213,15 @@ for cc in range(n_files):
     # Run the command
     result = subprocess.run(command, capture_output=True, text=True)
     if "[ERROR]" in result.stderr:
-        import shlex
+        result = subprocess.run(command, capture_output=True, text=True)
+        if "[ERROR]" in result.stderr:
+            result = subprocess.run(command, capture_output=True, text=True)
+            if "[ERROR]" in result.stderr:
+                import shlex
 
-        print(shlex.join(command))
-        print(result.stderr, file=sys.stderr)
-        raise Exception()
+                print(shlex.join(command))
+                print(result.stderr, file=sys.stderr)
+                raise Exception()
 
     os.remove(temp_script_path)
     for j, model_type in enumerate(model_types):
@@ -232,8 +237,20 @@ for cc in range(n_files):
             ious = np.array(ious)
             scores_mat[cc, j * len(promtp_types) + k] = ious.mean()
 
-import polars as pl
 
+
+    if cc % 50 != 0:
+        continue
+    cols = []
+    for model_type in (model_types):
+        for prompt_type in (promtp_types):
+            cols.append(f"{model_type}_{prompt_type}")
+
+    df = pl.DataFrame(scores_mat[:len(f_names)], schema=cols)
+    df = df.with_columns(pl.Series("file_names", f_names))
+    df.write_csv(f"C:\\Users\\carlos\\git\\benchmarking\\res\\{NAME}2.csv")
+
+    
 cols = []
 for model_type in (model_types):
     for prompt_type in (promtp_types):
@@ -241,4 +258,4 @@ for model_type in (model_types):
 
 df = pl.DataFrame(scores_mat, schema=cols)
 df = df.with_columns(pl.Series("file_names", f_names))
-df.write_csv(f"{NAME}.csv")
+df.write_csv(f"C:\\Users\\carlos\\git\\benchmarking\\res\\{NAME}2.csv")

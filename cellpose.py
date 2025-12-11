@@ -1,62 +1,13 @@
-import json
-import os
-import platform
-import random
-import subprocess
-import sys
-import tempfile
-
 import numpy as np
-import tifffile
+import os
+import subprocess
+import random
+import json
+import platform
+import tempfile
 from skimage.measure import label as cc_label
 from PIL import Image
-
-def relabel_consecutive(mask: np.ndarray) -> np.ndarray:
-    """
-    Relabel an instance segmentation mask so that foreground labels are consecutive (1..N).
-    Background (0) is preserved as 0. Order is by ascending original label, so any
-    skipped numbers cause subsequent labels to shift down.
-
-    Examples:
-      [0,1,1,2,0,8] -> [0,1,1,2,0,3]
-
-    Parameters
-    ----------
-    mask : np.ndarray
-        Integer array of any shape. 0 is background; positive integers are object labels.
-
-    Returns
-    -------
-    np.ndarray
-        New mask with labels in 1..N (0 remains 0). Dtype chosen to safely hold N.
-    """
-    mask = np.asarray(mask)
-    if mask.size == 0:
-        return mask.copy()
-
-    # Foreground positions
-    fg = mask > 0
-    if not np.any(fg):
-        return mask.copy()
-
-    # Unique positive labels, sorted
-    uniq = np.unique(mask[fg])  # strictly > 0 and sorted
-
-    # Map each positive label to its new consecutive id:
-    # For any value v in uniq, its position in uniq is searchsorted(v),
-    # so new_id = index + 1  (1-based)
-    # This avoids building a huge lookup table up to max(label).
-    out = mask.copy()
-    out_fg = out[fg]
-    out[fg] = 1 + np.searchsorted(uniq, out_fg)
-
-    # Choose a safe integer dtype that can hold N labels
-    n = int(uniq.size)
-    safe_dtype = np.min_scalar_type(n)
-    if np.issubdtype(out.dtype, np.integer) and np.iinfo(out.dtype).max >= n:
-        return out  # original dtype can hold the result
-    else:
-        return out.astype(safe_dtype, copy=False)
+import sys
 
 def split_disconnected(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
     out = mask.copy()
@@ -89,24 +40,24 @@ def iou_diagonal_fast(gt, pred):
 
 N_POINT_PROMPTS = 3
 
-SCRIPT_PATH = "scripts/default.py"
+SCRIPT_PATH = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\default.py"
 
-CELLPOSE_DIR = "/home/carlos/Pictures/samj_rebuttal/cellpose/"
+CELLPOSE_DIR = "C:\\users\\carlos\\datasets\\cellpose"
 REAL_FOLDER = "test"
 MASK_FOLDER = "test"
-RESULTS_PATH = os.path.join(os.getcwd(), "tmp")
+RESULTS_PATH = os.path.join(os.getcwd(), "tmp_cellpose")
 if not os.path.isdir(RESULTS_PATH):
     os.makedirs(RESULTS_PATH)
 POINT_PROMPTS = os.path.join(CELLPOSE_DIR, "point_prompts")
 if not os.path.isdir(POINT_PROMPTS):
     os.makedirs(POINT_PROMPTS)
 
-FIJI_PATH = "/home/carlos/Desktop/Fiji.app"
+FIJI_PATH = "C:\\Users\\carlos\\Desktop\\fiji-stable-win64-jdk\\Fiji.app"
 
 if platform.system() == "Linux":
     FIJI_EXEC = "ImageJ-linux64"
 elif platform.system() == "Windows":
-    FIJI_EXEC = "ImageJ-windows-x64.exe"
+    FIJI_EXEC = "ImageJ-win64.exe"
 elif platform.system() == "Darwin":  # macOS
     FIJI_EXEC = " Contents/MacOS/ImageJ-macos-x64"
 elif platform.system() == "Darwin" and ("arm64" in platform.machine() or "aarch64" in platform.machine()):  # macOS
@@ -137,8 +88,8 @@ for ii, ff in enumerate(all_files[:]):
     last_point_ind = len(ff) - 1 - ff[::-1].index("_")
     mask_name = ff[:last_point_ind] + "_masks.png"
     f_names.append(ff)
-    mask = np.array(Image.open(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name)))
-    mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
+    mask_pre = np.array(Image.open(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name)))
+    mask = split_disconnected(mask_pre, connectivity=2)
     bboxes = []
     points = []
     for i in range(1, mask.max() + 1):
@@ -148,7 +99,7 @@ for ii, ff in enumerate(all_files[:]):
         #bboxes.append([[left, bottom, right - left, top - bottom]])
         bboxes.extend([[left, bottom, right - left + 1, top - bottom + 1]])
 
-        point_inds = random.sample(range(inds[0].shape[0]), np.min([inds[0].shape[0], N_POINT_PROMPTS]))
+        point_inds = random.sample(range(inds[0].shape[0]), np.min([N_POINT_PROMPTS, inds[0].shape[0]]))
         xs = inds[1][point_inds]
         ys = inds[0][point_inds]
         pps = []
@@ -172,7 +123,7 @@ for ii, ff in enumerate(all_files[:]):
             + f"points='{json.dumps(points)}'\n" \
             + f"tmp_path=r'{RESULTS_PATH}'\n" \
             + "".join(modified_lines)
-    
+
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".py") as tmp_file:
         tmp_script_path = tmp_file.name
@@ -193,7 +144,7 @@ for ii, ff in enumerate(all_files[:]):
     if "[ERROR]" in result.stderr:
         import shlex
         print(shlex.join(command))
-        print("something happened")
+        print(result.stderr, file=sys.stderr)
         raise Exception()
     os.remove(tmp_script_path)
 
@@ -207,6 +158,7 @@ for ii, ff in enumerate(all_files[:]):
                 ious.append(iou[0])
             ious = np.array(ious)
             scores_mat[cc, j * len(promtp_types) + k] = ious.mean()
+
 
 import polars as pl
 cols = []

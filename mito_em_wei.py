@@ -11,6 +11,8 @@ import tifffile
 from skimage.measure import label as cc_label
 from PIL import Image
 
+import polars as pl
+
 def relabel_consecutive(mask: np.ndarray) -> np.ndarray:
     """
     Relabel an instance segmentation mask so that foreground labels are consecutive (1..N).
@@ -90,11 +92,11 @@ def iou_diagonal_fast(gt, pred):
 
 N_POINT_PROMPTS = 3
 
-SCRIPT_PATH = "scripts/default.py"
+SCRIPT_PATH = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\default.py"
 
-MITO_EM_MITOLAB_DIR = "/home/carlos/Pictures/samj_rebuttal/mitoem_wei_challenge/"
-REAL_FOLDER = "EM30-R-im/im"
-MASK_FOLDER = "EM30-R-mito-train-val-v2/mito-val-v2"
+MITO_EM_MITOLAB_DIR = r'C:\Users\carlos\datasets\mito_em_wei'
+REAL_FOLDER = "EM30-R-im\\im"
+MASK_FOLDER = "EM30-R-mito-train-val-v2\\mito-val-v2"
 
 RESULTS_PATH = os.path.join(os.getcwd(), "tmp_mito_em_wei")
 if not os.path.isdir(RESULTS_PATH):
@@ -105,7 +107,7 @@ if not os.path.isdir(POINT_PROMPTS):
 
 MAX_STR_LEN = 20_000
 
-FIJI_PATH = "/home/carlos/Desktop/Fiji.app"
+FIJI_PATH = "C:\\Users\\carlos\\Desktop\\fiji-stable-win64-jdk\\Fiji.app"
 
 if platform.system() == "Linux":
     FIJI_EXEC = "ImageJ-linux64"
@@ -126,10 +128,13 @@ promtp_types = ["points", "bboxes"]
 all_files = os.listdir(os.path.join(MITO_EM_MITOLAB_DIR, MASK_FOLDER))
 all_files.sort()
 scores_mat = np.zeros((len(all_files), len(model_types) * len(promtp_types)), dtype="float64")
-
+prev_calculated = pl.read_csv("C:\\Users\\carlos\\git\\benchmarking\\res\\mito_em_wei.csv")
+already_fnames = prev_calculated["file_names"].to_list()
 for cc, ff in enumerate(all_files):
     print(cc)
     f_names.append(ff)
+    if ff in already_fnames:
+        continue
     mask = tifffile.imread(os.path.join(MITO_EM_MITOLAB_DIR, MASK_FOLDER, ff))
     mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
     im_number = ff[len("seg"):-len(".tif")]
@@ -200,11 +205,15 @@ for cc, ff in enumerate(all_files):
     # Run the command
     result = subprocess.run(command, capture_output=True, text=True)
     if "[ERROR]" in result.stderr:
-        import shlex
+        result = subprocess.run(command, capture_output=True, text=True)
+        if "[ERROR]" in result.stderr:
+            result = subprocess.run(command, capture_output=True, text=True)
+            if "[ERROR]" in result.stderr:
+                import shlex
 
-        print(shlex.join(command))
-        print(result.stderr, file=sys.stderr)
-        raise Exception()
+                print(shlex.join(command))
+                print(result.stderr, file=sys.stderr)
+                raise Exception()
 
     os.remove(temp_script_path)
     for j, model_type in enumerate(model_types):
@@ -219,8 +228,19 @@ for cc, ff in enumerate(all_files):
                 ious.append(iou[0])
             ious = np.array(ious)
             scores_mat[cc, j * len(promtp_types) + k] = ious.mean()
+    
+    if cc % 1 != 0:
+        continue
+    cols = []
+    for model_type in (model_types):
+        for prompt_type in (promtp_types):
+            cols.append(f"{model_type}_{prompt_type}")
 
-import polars as pl
+    df = pl.DataFrame(scores_mat[:len(f_names)], schema=cols)
+    df = df.with_columns(pl.Series("file_names", f_names))
+    df.write_csv("C:\\Users\\carlos\\git\\benchmarking\\res\\mito_em_wei2.csv")
+
+
 
 cols = []
 for model_type in (model_types):
@@ -229,4 +249,4 @@ for model_type in (model_types):
 
 df = pl.DataFrame(scores_mat, schema=cols)
 df = df.with_columns(pl.Series("file_names", f_names))
-df.write_csv("cem_mitolab.csv")
+df.write_csv("C:\\Users\\carlos\\git\\benchmarking\\res\\mito_em_wei2.csv")

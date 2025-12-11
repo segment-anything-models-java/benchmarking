@@ -184,12 +184,12 @@ def iou_diagonal_fast(gt, pred):
 N_POINT_PROMPTS = 3
 
 
-CELLPOSE_DIR = "C:\\users\\carlos\\datasets\\cellpose"
-PROMPTS_FOLDER = ""
-REAL_FOLDER = "test"
-MASK_FOLDER = "test"
-QUPATH_PATH = os.path.join(CELLPOSE_DIR, "qupath")
-RES_DIR = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\res_microsam\\cellpose.csv"
+
+MITO_EM_MITOLAB_DIR = r'C:\Users\carlos\datasets\mito_em_wei'
+REAL_FOLDER = "EM30-R-im\\im"
+MASK_FOLDER = "EM30-R-mito-train-val-v2\\mito-val-v2"
+QUPATH_PATH = os.path.join(MITO_EM_MITOLAB_DIR, "qupath")
+RES_DIR = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\res_microsam\\mito_em_wei.csv"
 os.makedirs(os.path.dirname(RES_DIR), exist_ok=True)
 
 
@@ -208,13 +208,9 @@ model_types = [
             ]
 promtp_types = ["points", "bboxes"]
 
-all_files = os.listdir(os.path.join(CELLPOSE_DIR, REAL_FOLDER))
-cc = 0
-for ii, ff in enumerate(all_files[:]):
-    if "mask"in ff:
-        continue
-    cc += 1
-scores_mat = np.zeros((cc, len(model_types) * len(promtp_types)), dtype="float64")
+all_files = os.listdir(os.path.join(MITO_EM_MITOLAB_DIR, MASK_FOLDER))
+all_files.sort()
+scores_mat = np.zeros((len(all_files), len(model_types) * len(promtp_types)), dtype="float64")
 all_files.sort()
 
 
@@ -238,16 +234,15 @@ point_prompt_layer.border_color_mode = "cycle"
 rect_prompt_layer = viewer.add_shapes(
     face_color="transparent", shape_type='rectangle', edge_color="green", edge_width=4, name="prompts", ndim=2,
 )
-for ii, ff in enumerate(all_files[:]):
-    if "mask"in ff:
-        continue
-    cc += 1
-    print(ii, cc)
-    last_point_ind = len(ff) - 1 - ff[::-1].index("_")
-    mask_name = ff[:last_point_ind] + "_masks.png"
+for cc, ff in enumerate(all_files):
+    print(cc)
     f_names.append(ff)
-    mask = np.array(Image.open(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name)))
+    mask = tifffile.imread(os.path.join(MITO_EM_MITOLAB_DIR, MASK_FOLDER, ff))
     mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
+    im_number = ff[len("seg"):-len(".tif")]
+    im_name = "im" + im_number + ".png"
+
+
     with open(os.path.join(QUPATH_PATH, f"point_prompts_{ff}.json"), "r") as f:
         point_prompts = json.load(f)
     with open(os.path.join(QUPATH_PATH, f"bbox_prompts_{ff}.json"), "r") as f:
@@ -256,7 +251,7 @@ for ii, ff in enumerate(all_files[:]):
 
 
 
-    im = load_image(os.path.join(CELLPOSE_DIR, MASK_FOLDER, ff))
+    im = load_image(os.path.join(MITO_EM_MITOLAB_DIR, REAL_FOLDER, im_name))
     image_layer = viewer.add_image(im, name="image")
 
     for j, model_type in enumerate(model_types):

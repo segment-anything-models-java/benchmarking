@@ -184,12 +184,12 @@ def iou_diagonal_fast(gt, pred):
 N_POINT_PROMPTS = 3
 
 
-CELLPOSE_DIR = "C:\\users\\carlos\\datasets\\cellpose"
-PROMPTS_FOLDER = ""
-REAL_FOLDER = "test"
-MASK_FOLDER = "test"
-QUPATH_PATH = os.path.join(CELLPOSE_DIR, "qupath")
-RES_DIR = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\res_microsam\\cellpose.csv"
+
+DEEPBACS_DIR = "/home/carlos/Pictures/samj_rebuttal/deepbacs/ims/"
+REAL_FOLDER = "src"
+MASK_FOLDER = "mask"
+QUPATH_PATH = os.path.join(DEEPBACS_DIR, "qupath")
+RES_DIR = "/home/carlos/eclipse-workspace-test/scripts/scripts/res_microsam/deepbacs.csv"
 os.makedirs(os.path.dirname(RES_DIR), exist_ok=True)
 
 
@@ -208,13 +208,9 @@ model_types = [
             ]
 promtp_types = ["points", "bboxes"]
 
-all_files = os.listdir(os.path.join(CELLPOSE_DIR, REAL_FOLDER))
-cc = 0
-for ii, ff in enumerate(all_files[:]):
-    if "mask"in ff:
-        continue
-    cc += 1
-scores_mat = np.zeros((cc, len(model_types) * len(promtp_types)), dtype="float64")
+all_files = os.listdir(os.path.join(DEEPBACS_DIR, MASK_FOLDER))
+all_files.sort()
+scores_mat = np.zeros((len(all_files), len(model_types) * len(promtp_types)), dtype="float64")
 all_files.sort()
 
 
@@ -238,16 +234,14 @@ point_prompt_layer.border_color_mode = "cycle"
 rect_prompt_layer = viewer.add_shapes(
     face_color="transparent", shape_type='rectangle', edge_color="green", edge_width=4, name="prompts", ndim=2,
 )
-for ii, ff in enumerate(all_files[:]):
-    if "mask"in ff:
-        continue
-    cc += 1
-    print(ii, cc)
-    last_point_ind = len(ff) - 1 - ff[::-1].index("_")
-    mask_name = ff[:last_point_ind] + "_masks.png"
+for cc, ff in enumerate(all_files):
+    print(cc)
     f_names.append(ff)
-    mask = np.array(Image.open(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name)))
+    im = tifffile.imread(os.path.join(DEEPBACS_DIR, REAL_FOLDER, ff))
+    mask = tifffile.imread(os.path.join(DEEPBACS_DIR, MASK_FOLDER, ff))
     mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
+
+
     with open(os.path.join(QUPATH_PATH, f"point_prompts_{ff}.json"), "r") as f:
         point_prompts = json.load(f)
     with open(os.path.join(QUPATH_PATH, f"bbox_prompts_{ff}.json"), "r") as f:
@@ -256,7 +250,7 @@ for ii, ff in enumerate(all_files[:]):
 
 
 
-    im = load_image(os.path.join(CELLPOSE_DIR, MASK_FOLDER, ff))
+    im = load_image(im)
     image_layer = viewer.add_image(im, name="image")
 
     for j, model_type in enumerate(model_types):
@@ -292,6 +286,7 @@ for ii, ff in enumerate(all_files[:]):
         rect_prompt_layer.data = np.array([])
         ious = np.array(ious)
         scores_mat[cc, j * len(promtp_types) + 1] = ious.mean()
+    print(scores_mat[cc])
     viewer.layers.remove("image")
 
 cols = []

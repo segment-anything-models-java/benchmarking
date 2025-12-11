@@ -8,11 +8,13 @@ import tempfile
 
 import numpy as np
 import tifffile
+from pycocotools.coco import COCO
 from skimage.measure import label as cc_label
 from PIL import Image
 import polars as pl
 
 import napari
+from napari.viewer import Viewer
 
 import numpy as np
 from skimage import io, img_as_float
@@ -184,12 +186,10 @@ def iou_diagonal_fast(gt, pred):
 N_POINT_PROMPTS = 3
 
 
-CELLPOSE_DIR = "C:\\users\\carlos\\datasets\\cellpose"
-PROMPTS_FOLDER = ""
-REAL_FOLDER = "test"
-MASK_FOLDER = "test"
-QUPATH_PATH = os.path.join(CELLPOSE_DIR, "qupath")
-RES_DIR = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\res_microsam\\cellpose.csv"
+TN_DIR = r'C:\Users\carlos\datasets\tissuenet'
+REAL_FOLDER = "nuclei_ims"
+QUPATH_PATH = os.path.join(TN_DIR, "qupath_nuclei")
+RES_DIR = "C:\\Users\\carlos\\git\\benchmarking\\scripts\\res_microsam\\tissuenet_nuclei.csv"
 os.makedirs(os.path.dirname(RES_DIR), exist_ok=True)
 
 
@@ -208,16 +208,9 @@ model_types = [
             ]
 promtp_types = ["points", "bboxes"]
 
-all_files = os.listdir(os.path.join(CELLPOSE_DIR, REAL_FOLDER))
-cc = 0
-for ii, ff in enumerate(all_files[:]):
-    if "mask"in ff:
-        continue
-    cc += 1
-scores_mat = np.zeros((cc, len(model_types) * len(promtp_types)), dtype="float64")
-all_files.sort()
 
-
+n_ims = len(os.listdir(QUPATH_PATH)) // 2
+scores_mat = np.zeros((n_ims, len(model_types) * len(promtp_types)), dtype="float64")
 
 
 
@@ -238,16 +231,17 @@ point_prompt_layer.border_color_mode = "cycle"
 rect_prompt_layer = viewer.add_shapes(
     face_color="transparent", shape_type='rectangle', edge_color="green", edge_width=4, name="prompts", ndim=2,
 )
-for ii, ff in enumerate(all_files[:]):
-    if "mask"in ff:
-        continue
-    cc += 1
-    print(ii, cc)
-    last_point_ind = len(ff) - 1 - ff[::-1].index("_")
-    mask_name = ff[:last_point_ind] + "_masks.png"
-    f_names.append(ff)
-    mask = np.array(Image.open(os.path.join(CELLPOSE_DIR, MASK_FOLDER, mask_name)))
+
+mask_mat = np.load(os.path.join(TN_DIR, "test.npz"))["y"]
+
+for cc in range(n_ims):
+    print(cc)
+    ff = f"im_{cc}"
+    f_names.append(ff + ".png")
+    mask = mask_mat[cc, :, :, 0]
     mask = relabel_consecutive(split_disconnected(mask, connectivity=2))
+    path = os.path.join(TN_DIR, REAL_FOLDER, f"im_{cc}.tif")
+    
     with open(os.path.join(QUPATH_PATH, f"point_prompts_{ff}.json"), "r") as f:
         point_prompts = json.load(f)
     with open(os.path.join(QUPATH_PATH, f"bbox_prompts_{ff}.json"), "r") as f:
@@ -256,7 +250,7 @@ for ii, ff in enumerate(all_files[:]):
 
 
 
-    im = load_image(os.path.join(CELLPOSE_DIR, MASK_FOLDER, ff))
+    im = load_image(path)
     image_layer = viewer.add_image(im, name="image")
 
     for j, model_type in enumerate(model_types):
@@ -268,12 +262,15 @@ for ii, ff in enumerate(all_files[:]):
         for ip, pp in enumerate(point_prompts):
             point_prompt_layer.data = np.array([[b, a] for a, b in pp])
             seg = segment(viewer=viewer)
-            iou = iou_diagonal_fast((mask == ip + 1) * 1, seg)
+            iou = iou_diagonal_fast((mask == (ip + 1)) * 1, seg)
             ious.append(iou[0])
         point_prompt_layer.data = None
 
         ious = np.array(ious)
-        scores_mat[cc, j * len(promtp_types)] = ious.mean()
+        if ious.size == 0:
+            scores_mat[cc, j * len(promtp_types)] = 0.0
+        else:
+            scores_mat[cc, j * len(promtp_types)] = ious.mean()
 
         ious = []
         for ib, bb in enumerate(bbox_prompts):
@@ -287,11 +284,15 @@ for ii, ff in enumerate(all_files[:]):
             seg = segment(viewer=viewer)
             if len(seg.shape) == 3:
                 seg = seg[:, :, 0]
-            iou = iou_diagonal_fast((mask == ib + 1) * 1, seg)
+            iou = iou_diagonal_fast((mask == (ib + 1)) * 1, seg)
             ious.append(iou[0])
         rect_prompt_layer.data = np.array([])
         ious = np.array(ious)
-        scores_mat[cc, j * len(promtp_types) + 1] = ious.mean()
+        if ious.size == 0:
+            scores_mat[cc, j * len(promtp_types) + 1] = 0.0
+        else:
+            scores_mat[cc, j * len(promtp_types) + 1] = ious.mean()
+    print(scores_mat[cc])
     viewer.layers.remove("image")
 
 cols = []
